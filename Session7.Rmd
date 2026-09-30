@@ -1,0 +1,157 @@
+---
+title: "Session7"
+author: "Paddy Kafeero"
+date: "2026-01-23"
+output: html_document
+---
+
+
+```{r}
+#Load packages
+source("C:/Users/PaddyK/Desktop/Random_r_Code/src/setup.R")
+```
+
+
+Question 1
+```{r}
+##Loading the data
+load("C:/Users/PaddyK/Desktop/MSc Medical Statistics/Survival_Analysis/survival_rfiles/aaatrial_2016.RData")
+summary(aaatrial)
+View(aaatrial)
+
+aaatrial <- aaatrial %>%  select(id, group, dateran, aaadeath, alldeath, deathtype, timeout, dob)
+
+aaatrial$group <-  factor(aaatrial$group, levels =c(0,1), labels = c("Control","Invited"))
+aaatrial$aaadeath <-  factor(aaatrial$aaadeath, levels =c(0,1), labels = c("Censored/Non-AAA-death","AAA-death"))
+aaatrial$alldeath <-  factor(aaatrial$alldeath, levels =c(0,1), labels = c("Censored","Death(any cause)"))
+aaatrial$deathtype <-  factor(aaatrial$deathtype, levels =c(0,1,2), labels = c("Censored","non-AAA death","AAA-death"))
+
+table(aaatrial$deathtype)
+table(aaatrial$group)
+
+##Followup in years using dateran and timeout
+aaatrial$time <- as.numeric(difftime(aaatrial$timeout, aaatrial$dateran, units="days")) / 365.25
+View(aaatrial)
+
+##Cause specific cox model
+cox.cs <- coxph(Surv(time, as.factor(deathtype)) ~ group, data=aaatrial, id=id)
+summary(cox.cs)
+  #form of the hazard models: h1(t|x) = ho1Exp(eB1x)
+
+#equivalent way
+cox.AAA<-coxph(Surv(time,deathtype=="AAA-death")~group,data=aaatrial)
+summary(cox.AAA)
+# cox.AAA<-coxph(Surv(time,aaadeath)~group,data=aaatrial)#same
+cox.nonAAA<-coxph(Surv(time,deathtype=="non-AAA death")~group,data=aaatrial)
+summary(cox.nonAAA)
+
+#How the competing event is treated in fitting cause-specific Cox models
+#People without the event of interested are not considered part of the risk set but rather as censored individuals
+
+```
+groupInvited_1:2     0.977: Hazard of non-AAA death is lowered by 2% if the person is invited vs when they are a control
+groupInvited_1:3     0.669: Hazard of AAA death is lowered by 33% if the person is invited vs when they are a control
+
+Question 2
+```{r}
+cinc.cs <- survfit(cox.cs,newdata = data.frame(group=c("Control","Invited")))
+summary(cinc.cs, times=c(1,5,10))  ###surv fit will know that because death type is a factor, i am interested in cumulative incidence. group has two individuals
+
+
+plot(cinc.cs,lwd=2,lty=c(1,2,1,2),col=c("black","black","grey","grey"))
+legend("topleft",c("Control, Non-AAA-death","Invited, Non-AAA-death",
+                   "Control, AAA-death","Invited, AAA-death"),
+       lwd=2,lty=c(1,2,1,2),col=c("black","black","grey","grey"))
+```
+Cumulative incidence for AAA death at time 5: Control(0.1371); Invited(0.1343)
+Cumulative incidence for non-AAA death at time 5: Control(0.00521); Invited(0.00349)
+
+
+Question 3
+```{r}
+aaatrial$age_yrs <- as.numeric(difftime(aaatrial$dateran, aaatrial$dob, units="days")) / 365.25
+View(aaatrial)
+
+##Cause specific cox model
+cox.cs_age <- coxph(Surv(time, as.factor(deathtype)) ~ group+age_yrs, data=aaatrial, id=id)
+summary(cox.cs_age)
+
+
+#Equivalent
+cox.AAA_age<-coxph(Surv(time,deathtype=="AAA-death")~group+age_yrs,data=aaatrial)
+summary(cox.AAA_age)
+# cox.AAA<-coxph(Surv(time,aaadeath)~group,data=aaatrial)#same
+cox.nonAAA_age<-coxph(Surv(time,deathtype=="non-AAA death")~group+age_yrs,data=aaatrial)
+summary(cox.nonAAA_age)
+
+
+```
+AAA deaths: HRS
+groupInvited    0.6703
+age_yrs         1.1602: Given that an individual is alive at a specific time, an increase in age by 1 year increased the hazard of Non-aaa deaths by 16% keeping other factors constant.
+
+Non-AAA deaths: HRs
+groupInvited     0.978
+
+
+Question 4
+```{r}
+
+cinc.cs_age <- survfit(cox.cs_age,newdata = data.frame(id=1:4, group=c("Control","Invited","Control","Invited"), age_yrs=c(65,65,70,70)))  ##creatng a dataframe for just 4 people
+
+summary(cinc.cs_age, times=c(1,5,10))
+
+
+```
+Person 1: nonAAA (cum=0.0896); AAA(cum=0.002638)
+Person 2: nonAAA (cum=0.0877); AAA(cum=0.001771)
+Person 3: nonAAA (cum=0.143); AAA(cum=0.00538)
+Person 4: nonAAA (cum=0.1401); AAA(cum=0.00362)
+
+
+
+Question 5: Fine and Gray models (subdistribution hazard models)
+```{r}
+crr.AAA <- crr(aaatrial$time, aaatrial$deathtype, 
+               cov1=aaatrial$group, failcode=2)  ###group and deathtype shouldnt be factors
+summary(crr.AAA)
+
+
+```
+aaatrial$group1     0.671 This is a subdistribution hazard ratio.
+
+
+Question 6
+```{r}
+cinc.fg.AAA <- predict.crr(crr.AAA, cov1 = c(0,1))
+#Note:
+#Column 1 is time
+#Column 2 is cumulative incidence for AAA in group 0
+#Column 2 is cumulative incidence for AAA in group 1
+head(cinc.fg.AAA)
+
+```
+
+
+
+Question 7
+```{r}
+#i: Non-parametric method of getting cumulatice incidence. Not assuming any model assumptions
+
+plot(cinc.cs)
+
+#ii Cause specific: assuming proportional hazards
+plot(cinc.cs)
+
+#iii :Assuming proportionality of subdistribution hazards for AAA deaths
+plot(x=cinc.fg.AAA[,1], y=cinc.fg.AAA[,2], lwd=2, type = "s")
+plot(x=cinc.fg.AAA[,1], y=cinc.fg.AAA[,3], lwd=2, type = "s")
+
+
+
+
+
+```
+
+
+
