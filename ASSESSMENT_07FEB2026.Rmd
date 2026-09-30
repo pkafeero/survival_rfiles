@@ -1,0 +1,854 @@
+---
+title: "Assessment"
+author: "Paddy Kafeero"
+date: "2026-01-30"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+#Load packages
+source("C:/Users/PaddyK/Desktop/Random_r_Code/src/setup.R")
+```
+
+Time of Origin: TIME OF DIAGNOSIS -- Same date as start of treatment
+date. Treatment: Radiotherapy alone (0), Radiotherapy plus chemotherapy
+(1)
+
+```{r}
+##Import the data
+assignment <- rio::import("./assignment_data_2026.csv")
+View(assignment)
+
+##Labeling caterical values
+assignment <- assignment %>% 
+  mutate(
+    status = factor(status, levels=c(0,1,2), labels = c("Censored","Disease relapse","Death without relapse")),
+    trtgiven = factor(trtgiven, levels=c(0,1),labels=c("Radiotherapy only","Radiotherapy plus chemotherapy")),
+    sex = factor(sex, levels = c(0,1), labels = c("Male","Female")),
+    clinstg =factor(clinstg, levels = c(1,2), labels = c("Stage I","Stage II")),
+    medwidsi = factor(medwidsi, levels = c(0,1,2), labels = c("None","Small","Large")),
+    extranod = factor(extranod, levels = c(0,1), labels = c("No","Yes"))
+  )
+
+#View(assignment)
+names(assignment)
+```
+
+#### Part 1: Descriptive analysis
+
+Methods
+
+a
+
+Descriptive statistics for the the treatment strategies were described
+as counts and percentages. Mean, standard deviation and range were used
+for age and time by the treatment groups, whereas counts and percentages
+were used for sex (Male/Female), status (Censored/Disease relapse/Death
+without relapse). clinical stage at diagnosis (Stage I/Stage II), extent
+of mediastinum involvement at diagnosis (Non/Small/Large) and
+extra-nodal disease presence at diagnosis(Yes/No). Density plots were
+used to investigate the distribution of age within the two treatment
+groups, and ttests were used to assess presence of difference in time
+and age by the two treatment groups.
+
+b
+
+A variable was created to contain the composite outcome of disease
+relapse and death without relapse to be used for the analysis.
+
+Kaplan-Meier estimates and plots were used to compare the survival
+probabilities in the two treatment groups.
+
+A log rank test for non-parametric methods was used to assess difference
+in survival times between the two treatment strategies.
+
+c
+
+Aelan-Johansen estimates were used to ascertain the association between
+treatment status ad the competing outcomes. These were also used to plot
+cumulative incidence of the events by treatment group. A grays test was
+used to check whether there was truly a difference in the incidence of
+the events by the treatment strategies.
+
+```{r}
+##Summarising characteristics
+#summarytools::dfSummary(assignment) ##No missing data for any of the variables.
+#assignment %>% group_by(trtgiven) %>% dfSummary()
+
+tab1<-CreateTableOne(
+  vars=c("age","sex","trtgiven","medwidsi","extranod","clinstg", "time","status"),
+  strata="trtgiven",
+  data=assignment,
+  factorVars=c("sex","trtgiven","status","medwidsi","extranod","clinstg"),
+  includeNA = FALSE,
+  test = F,
+  addOverall = T
+)
+print(tab1,showAllLevels = T)
+
+##Age
+assignment %>% group_by(trtgiven) %>% summarise(minage=min(age), medage=median(age),maxage=max(age))
+
+
+###Distribution of time and age: Do we assume normality for them?
+ggplot(assignment, aes(x=age)) + geom_density()
+ggplot(assignment, aes(x=time)) + geom_density()
+##Ttest for time
+t.test(assignment$time~assignment$trtgiven)
+t.test(assignment$time~assignment$event)
+
+
+###BY outcome
+tab2<-CreateTableOne(
+  vars=c("age","sex","trtgiven","medwidsi","extranod","clinstg", "time","status"),
+  strata="status",
+  data=assignment,
+  factorVars=c("sex","trtgiven","medwidsi","extranod","clinstg"),
+  includeNA = FALSE,
+  test = F,
+  addOverall = T
+)
+print(tab2,showAllLevels = T)
+
+
+
+##Plots to see differences in treatment groups and outcome
+
+```
+
+Consider the composite outcome of disease relapse or death without
+relapse (i.e. combining these two outcomes).
+
+```{r}
+##Summarising time to composite outcome: generate a binary variable for  an event
+summary(assignment$time)
+ggplot(assignment, aes(x=time)) + geom_density()
+
+##Creating a composite outcome
+assignment$event <- ifelse(assignment$status==0,0,1)
+
+##Using KM
+km_assign <- survfit(Surv(time, event)~trtgiven, data=assignment)
+summary(km_assign)
+summary(km_assign, censored = T)
+
+plot(km_assign, lty = c(1,2), col = c("navyblue","maroon"),
+     xlab="Time since diagnosis (months)",
+     ylab="Survival probability"     )
+title(main="Estimated survival probability plot",font=2)
+legend("topright",c("Radiotherapy alone","Radio + Chemo"),
+col=c("navyblue","maroon"), lwd = 2,lty = c(1,2))
+
+##Fitting an weibul model
+# weib_assign <-  mexhaz(Surv(time, event)~as.factor(trtgiven),base="weibull",data=assignment)
+# summary(weib_assign) ##from this data we see radio+chemo people have HR 28% lower risk of the outcome. We are not assuming a constant rate here. This model can fit the data well based on the p-value for logRHO.cat("From the logRho value, we see that there is sufficient evidence to indicate that the survival between the two groups is different; with logRho =", 0.305864, "and the p-value < 0.0001 ", )
+
+##Log rank test to check difference in survival within groups
+survdiff(Surv(time, event)~trtgiven, data=assignment) ##
+library(survminer)
+ggsurvplot(km_assign, conf.int = T, pval = T, main="KM plots for treatment strategies", risk.table = TRUE, risk.table.clean=TRUE, risk.table.height=0.25)
+
+```
+
+(c) Consider disease relapse and death without relapse as separate
+    events.
+
+```{r}
+#Summarising the time to disease relapse
+summary(assignment$time[assignment$status==1]) ##minimum follow up is 0.003 months and max is 19.8 months
+summary(assignment$time[assignment$status==2])
+
+#For relapse
+# aataylor_relapse <- survfit(Surv(time, status==1) ~ trtgiven, data=assignment) ##Disease relapse
+# summary(aataylor_relapse)
+# survdiff(Surv(time, status==1) ~ trtgiven, data=assignment)
+# # For death without relapse
+# survdiff(Surv(time, status==2) ~ trtgiven, data=assignment)
+
+
+#Association between treatment status and the competing outcomes using non-parametric
+Surv(time=assignment$time,event=assignment$status)
+nonp_compet <- survfit(Surv(time, as.factor(status)) ~trtgiven, data=assignment) ##fitting the Aaelen Johnson estimator for cumulative incidence
+summary(nonp_compet)
+
+#plot(nonp_compet, lwd=2,col=c("lightblue","maroon"))
+#legend("topleft",c("Disease relapse","Death without relapse"),
+#lwd=2,col=c("lightblue","maroon"))
+
+plot(nonp_compet,lwd=2,lty=c(1,2,1,2),col=c("navyblue","navyblue","maroon","maroon"),
+     xlab = "Time from diagnosi",
+     ylab = "Cumulative Incidence")
+legend("bottomright",c("Radio, Disease relapse","Radio+Chemo, Disease relapse", "Radio, Death without relapse","Radio+Chemo, Death without relapse"), 
+       lwd=2,lty=c(1,2,1,2),col=c("navyblue","navyblue","maroon","maroon"))
+
+##using Grays test to test the NULL that there is no difference in the cumulative incidences by treatment given. The status variable should be left as a numeric variable and not changed to a factor
+cuminc(ftime=assignment$time, fstatus=assignment$status, group=assignment$trtgiven)
+
+```
+
+Results
+
+a
+
+Out of the 845 participants, 71.1%(n=601) received radiotherapy alone.
+Participants receiving radiotherapy alone were on average older than
+those receiving radiotherapy plus chemotherapy(mean=36.02 vs 33.81
+years). Participants
+
+The average time to censoring, disease relapse or death without relapse
+was longer in the intervention group (14.08 months) compared to the
+radio alone group (12.33 months).
+
+For both treatment groups, most patients were diagnosed with stage 2
+clinical diagnosis (339[56.4%] for radio and 215[88.1] for radio plus
+chemo), while most patients include in the study were diagnosed with
+stage 2 diagnosis (65.6%). More participants receiving intervention had
+extranodal disease at diagnosis (19.7) compared to those receiving radio
+alone (4.8%). Most of the patients included in the study did not have
+mediastnum involvement at diagnosis (53.7%, n=454), but a higher potion
+of participants experiencing large mediastnum involvement were in the
+intervention group (36.5% vs 3.8%) while the control group had more with
+small mediastnum involvement (34.1% vs 30.4%).
+
+On average, participants who died without relapse were older (mean
+=47.85 years) than those who experienced the disease relapse (mean =
+37.66 years), but this could be because older participants were more
+fatally affected by the intervention procedures than the younger ones.
+Additionally, participants who experienced disease relapse received it a
+much earlier time (mean=2.65) than those who experienced death without
+relapse (mean=12.37 months) indicating earlier experience of the
+condition regardless of the treatment strategy used. Gender was balanced
+within the three groups of status with slightly more men experiencing
+death without relapse than women (n=84 vs n=46).
+
+At ttest to investigate whether the difference is time between the two
+treatment groups indicates evidence (p-value=0.009) of a difference
+between the two groups.
+
+Age was positively skewed, indicating that most participants in the
+study were younger
+
+b
+
+Overall, the minimum time to event is 0.003 months and the maximum time
+to event is 35.9 months. On average participants had experieced the
+composite outcome by 12.8 months. From the survival plots, we notice
+that the survival plots are crossing within the first 1 month with the
+intervention group having steep fall in survival. however after 1 month,
+the intervention group has higher suurvival and stabilises at around 25
+months indicating lower risk of experiencing the event in the
+intervention group. The control group survival plateus around 3 months
+later. In general, the curves are very similar. The CI are wider at the
+end of the cures becausee we have few events. 50% of the particpants had
+experiencd the eent by 20 months, wheres less than 50% of the ppts In
+the intervention group experienced the event.
+
+For the two treatments, we have strong evidence for difference in time
+to the event. p-value=0.005
+
+c
+
+For disease relapse, the minimum time to the event is 0.003 months
+whereas the maximum time to the event is 19.8 months.
+
+For death without relapse, minimum time to event is 0.6 months whereas
+the maximum time to event is 29 months.
+
+From the summary of the time we see that participants are experiencing
+disease relapse way earlier than death without relapse, but also stop
+getting event earlier than the latter.
+
+Aelan-Johansen plot shows that a high incidence of disease relapse
+within the first 5 months since diagnosis for both treatment strategies
+and these stabilize at around 20 months. No more events are experienced
+after 20 months. For death without relapse however, the plot shows a
+steady increase in the cases for both groups, with the intervention
+group plateauing earlier than the radio alone group.
+
+From the Grays test: The null is that there is no difference in
+cumulative incidence of the two treatment groups!
+
+Disease relapse: Our p-value (0.0008) shows strong evidence of
+differences in cumulative difference between the two groups.
+
+Death without relapse: No evidence of a difference between the two
+groups (p-value = 0.3740).
+
+#### Part 2: Investigating conditional associations: composite outcome a) Cox regression analyses
+
+Methods
+
+A variable was created to contain the composite outcome of disease
+relapse and death without relapse to beused for the analysis. A cox
+proportional hazard model was created to check for association of
+treatment strategy with the composite outcome. An adjusted cox model was
+run to check for the association of the treatment with the outcome
+conditional on other covariates in the dataset. Survival curves were
+plotted for participants taking either of the treatment strategies and
+conditional survival curves up to 12 month obtained. Estimated risks of
+hazard up to 12 months were also obtained by subtracting the conditional
+survival probability from 1.
+
+```{r}
+##Without adjustment
+assignment$event <- ifelse(assignment$status==0,0,1)
+table(assignment$event, assignment$status)
+cox_p2 <- coxph(Surv(time, event)~trtgiven, data = assignment)
+summary(cox_p2) ##The HR and the p-values for this model are similar to the Weibull distribution model run on the same data. p-value = 0.005 & HR=0.7254
+  #plot values using the cox model and compare to the KM plot
+  assign_p2_survfit=survfit(cox_p2,newdata=data.frame(trtgiven=c(0,1)))
+plot(assign_p2_survfit,conf.int = T,
+     col=c("black","grey"),
+     xlab="Time since diagnosis", ylab="Survival probability")
+legend(x="bottomleft",c("Placebo","Active"),
+       col=c("black","grey"),lty=1)
+
+summary(pbc.survfit,censored = T,times = 5)
+
+##The plot of the cox model and the KM plot are different. In the KM, we assume the proportional hazard is constant between the two groups over the period of study. The KM is non-parametric though.
+plot(assign_p2_survfit,fun="cloglog",conf.int = T,
+xlab="time (log scale)",ylab="log(-log S(t))",
+col=c("black","grey")) ##checking the proportional hazards assumption, we confirm that the assumption is true given the parallel lines with no overlapping.
+
+##With adjustment: Assuming NO ASSUMPTION OF ASSOCIATION
+cox_p2_adj <- coxph(Surv(time, event)~factor(trtgiven)+age+sex+clinstg+factor(medwidsi)+factor(extranod), data = assignment, x=T)
+summary(cox_p2_adj) ##how do we check the assumption that age is 
+
+
+#Assumptions of the multivariable adjusted COx model.
+#PH assumption: For the cox model, we use the schoenfield residuals method
+sch.resid_p2a<-cox.zph(cox_p2_adj, transform = 'identity')
+sch.resid_p2a
+par(mfrow=c(2,2))
+plot(sch.resid_p2a,col="red",lwd=2)
+
+##We can assess whether the continuous variables should be transformed using Martingale residuals. Check whether functional form of age is appropriate for our model
+#Martingale plot foor age
+p2.cox.noage<-coxph(Surv(time=time,event=event)~trtgiven+sex+clinstg+factor(medwidsi)+factor(extranod),data=assignment)
+mgale.res.noage<-resid(p2.cox.noage,type="martingale")
+plot(assignment$age,mgale.res.noage,
+     xlab="Age",ylab="Martingale residuals")
+lines(lowess(assignment$age,mgale.res.noage),col="red",lwd=2)
+abline(h=0,lwd=2,col="grey")
+#Martingale residual plot for age:including age in Coxmodel
+p2.cox.age<-coxph(Surv(time=time,event=event)~trtgiven+age+sex+clinstg+factor(medwidsi)+factor(extranod), data=assignment)
+mgale.res.age<-resid(p2.cox.age,type="martingale")
+
+plot(assignment$age, mgale.res.age, xlab="Age", ylab="Martingale residuals")
+lines(lowess(assignment$age, mgale.res.age),col="red",lwd=2)
+abline(h=0,lwd=2,col="grey")
+
+
+##The martingale including age is fine, we notice that age is in its correct functional format to be used in the model
+```
+
+b)  Conditional survival probabilities
+
+```{r}
+##Create a dataset with radio therapy only and then compare a new dataset
+p2b_data_radio <- expand.grid(
+  trtgiven = 0, ##Radiotherapy only
+  clinstg=1,
+  age=50,
+  sex=1, ##1 for Female
+  medwidsi=1,
+  extranod=1
+)
+
+
+
+#Getting estimated survival curves
+p2b_radio <- survfit(cox_p2_adj, newdata = p2b_data_radio)
+summary(p2b_radio)
+
+plot(p2b_radio)
+
+##Radiotherapy+Chemo
+p2b_data_radiochem <- p2b_data_radio
+p2b_data_radiochem$trtgiven <- 1 ##Radiotherapy + Chemotherapy
+p2b_radiochemo <- survfit(cox_p2_adj, newdata = p2b_data_radiochem)
+plot(p2b_radiochemo)
+
+names(p2b_radiochemo)
+
+##Plots comparing the probabilities
+plot(p2b_radio, conf.int = F, col = "black",
+     xlab = "Time since diagnosis (months)",
+     ylab = "Survival probability",
+     main = "Estimated Survival curves plots under two the two treatment strategies ")
+lines(p2b_radiochemo, conf.int = F, col = "grey")
+legend("topright", c("Radio", "Radio+Chemo"), col=c("black","grey"), lwd=2)
+
+
+##############################################################
+#p2b_2 <- survfit(Surv(time, event)~trtgiven, data = assignment)
+#plot(p2b_2)
+
+##At 12 months
+#summary(p2b_2, times=12)
+p2b_riskradio <- 1-summary(p2b_radio, times=12)$surv
+p2b_riskradiochemo <- 1-summary(p2b_radiochemo, times=12)$surv
+
+
+```
+
+Results
+
+a
+
+Without adjustment
+
+The HR for radio plus chemo is 0.7254 (95% CI 0.58 to 0.907). This
+indicates that the radio plus chemo group is associated with a 27% lower
+risk of the composite outcome compared to the radiotherapy alone group.
+There is also some strong evidence of this association (p-value=0.005).
+
+With adjustment
+
+The HR for radio plus chemo is 0.6525 (95% CI 0.5043 to 0.8442), for age
+1.033(95% CI 1.027 to 1.04), sex 0.8546 (95% CI 0.7003 to 1.0429), for
+clinical stage diagnosis 1.4481 (95% CI 1.1491 to 1.8249), for Small
+mediastinum involvemnt at diagnosis 0.82(95% CI 0.6365 to 1.0564), for
+large mediastinum involvement 1.0184 (95% CI 0.7015 to 1.4783) and for
+extranodal disease 1.1829 (95% CI 0.8324 to 1.6809).
+
+From this, we can say that theintervention group sis estimated to have a
+hazard for the composite ooutcome that is 35% lower than the
+radiotherapy alone group, conditional on age, sex, clinical stage,
+mediastnum involvement and extranodal disease. For age, we can say that
+a unit increase in age is associated with a 3% increase in hazard
+conditional on other covariates(we have very strong evidence). Females
+have a 15% lower hazard compared to the males (no evidence). Patients
+with stage 2 clinical stage at diagnosis have a 45% higher risk than
+stage 1, conditional on other covariates (strong evidence). Patients
+with small extent of mediastinum involvement at diagnosis are estimated
+to have a hazard that is 18% lower than those without mediastinum
+involvement, conditional on other covariates (no evidence). On the
+contrary patients with large extent of mediastinum involvement at
+diagnosis are estimated to have a hazard that is 2% higher than those
+without mediastinum involvement, conditional on other covariates (no
+evidence). Participants will extranodal disease have an estimated hazard
+of of the composite outcome that is 18% higher that those without,
+conditional on the other covariates, and there is no evidence for this
+association though.
+
+b
+
+Figrure: Estimated conditional survival curves for the two treatment
+strategies
+
+Estimated risk of disease relapse/death without relapse for radiotherapy
+alone is 0.5276779 compared to 0.3870146 of the radiotherapy plus
+chemotherapy group. We can see that for the treatment groups, based on
+the composite outcome, intervention group shows that it is more
+beneficial than the radio alone group.
+
+#### Part 3: Investigating conditional associations: competing events a) Cause-specific cox
+
+Methods
+
+Cause-specific proportional hazards models were used to compare the
+hazard of disease relapse and death without relapse between the
+radiotherapy alone and the radiotherapy plus chemotherapy groups.
+Additionally, they were also used to generate cumulative incidence
+curves and the cumulative incidence at 12 months for a patient that ...
+An Aalen-Johnson cumulative incidence curve was generated to compare the
+cumulative incidence for the two events when considering other
+covariates.
+
+The grays test was used to test the null hypothesis of whether there was
+a difference in the cumulative incidences for disease relapse and death
+without relapse between the two groups.
+
+```{r}
+##Looking at the survival times
+Surv(time=assignment$time,event=as.factor(assignment$status))[1:10]
+
+##Lets try too compare the cumulative incidences and their plots for the competing groups
+#Estimate the cumulative incidences using the Aalen-Johansen estimator
+cum_p3 <- survfit(Surv(time, as.factor(status)) ~trtgiven, data=assignment)
+#plot the cumulative incidences
+# plot(cum_p3, lwd=2,col=c("black","grey"),
+#      xlab="Time since randomisation (years)",
+#      ylab="Cumulative incidence")
+# legend("topleft",c("Disease relape","Death without relapse"),
+#        lwd=2,col=c("black","grey"))
+
+plot(cum_p3,lwd=2,lty=c(1,2,1,2),col=c("navyblue","navyblue","maroon","maroon"),
+     xlab = "Time from diagnosi",
+     ylab = "Cumulative Incidence")
+legend("topleft",c("Radio, Disease relapse","Radio+Chemo, Disease relapse", "Radio, Death without relapse","Radio+Chemo, Death without relapse"),
+       lwd=2,lty=c(1,2,1,2),col=c("navyblue","navyblue","maroon","maroon"))
+
+#Without adjustment
+cox_p3 <- coxph(Surv(time, as.factor(status))~trtgiven, data = assignment, id=id)
+summary(cox_p3)
+  
+#With adjustment
+cox_p3_adj <- coxph(Surv(time, as.factor(status))~trtgiven+age+sex+clinstg+factor(medwidsi)+extranod, data = assignment, id=id)
+summary(cox_p3_adj)
+
+
+
+```
+
+b)  Cumulative incidences
+
+```{r}
+#Getting estimated survival
+#Radiotherapy alone
+p3b_radio <- survfit(cox_p3_adj, newdata = p2b_data_radio)
+summary(p3b_radio)
+
+plot(p3b_radio)
+
+plot(p3b_radio, ylab="Cumulative incidence",
+     xlab = "Times from diagnosis (months)",
+     main="Cumulative incidence curves for the specific events with radiotherapy alone",
+     lwd = 2, lty = c(1,2))
+legend("bottomright", c("Disease Relapse", "DeathNoRelapse"),
+       lwd=2,
+       lty=c(1,2)
+       )
+
+
+##Radiotherapy+Chemo
+p3b_data_radiochem <- p3b_radio
+p3b_data_radiochem$trtgiven <- 1 ##Radiotherapy + Chemotherapy
+p3b_radiochemo <- survfit(cox_p3_adj, newdata = p2b_data_radiochem)
+plot(p3b_radiochemo)
+
+plot(p3b_radiochemo, ylab="Cumulative incidence",
+     xlab = "Times from diagnosis (months)",
+     main="Cumulative incidence curves for the specific events with radiotherapy plus chemotherapy",
+     lwd = 2, lty = c(1,2))
+legend("bottomright", c("Disease Relapse", "DeathNoRelapse"),
+       lwd=2,
+       lty=c(1,2)
+       )
+
+###COMBINED PLOT FOR CUMULATIVE INCIDENCES
+##Plots comparing the probabilities
+plot(p3b_radio, conf.int = F, col = c("black","grey"), lwd=2, lty = 1,
+     xlab = "Timme in months",
+     ylab = "Cumulative Incidence",
+     main = "Estimated Survival curves plots under two the two treatment strategies ", ylim = c(0,0.6))
+lines(p3b_radiochemo, conf.int = F, col = c("black","grey"), lwd=2, lty = 2)
+legend("bottomright",c("Radio, Disease relapse","Radio+Chemo, Disease relapse", "Radio, Death without relapse","Radio+Chemo, Death without relapse"), lwd=2,lty=c(1,2,1,2),col=c("black","black","grey","grey"))
+
+plot(p3b_radio, conf.int = F, col = c("black","grey"), lwd=2, lty = 1,
+     xlab = "Timme in months",
+     ylab = "Cumulative Incidence",
+     main = "Estimated Survival curves plots under two the two treatment strategies ", ylim = c(0,0.6))
+lines(p3b_radiochemo, conf.int = F, col = c("black","grey"), lwd=2, lty = 2)
+legend("topleft",c("RO: DR","RC: DR", "RO: DWR","RC: DWR"), lwd=2,lty=c(1,2,1,2),col=c("black","black","grey","grey"), text.width = 6)
+
+
+
+#legend("topright", c("DiseaseRelapse", "DeathNoRelapse"), col=c("black","grey"), lwd=2)
+
+
+##CUMULATIVE INCIDENCES At 12 months
+summary(p3b_radio, times=c(1,12,24))
+summary(p3b_radiochemo, times=c(1,12,24))
+##using Grays test to test the NULL that there is no difference in the cumulative incidences by treatment given. The status variable should be left as a numeric variable and not changed to a factor
+cuminc(ftime=assignment$time, fstatus=assignment$status, group=assignment$trtgiven)
+##from the test, we se ethat we have evidence against the null. For Disease Relapse, cumulative incidence between the treatment groups is different
+#For Death without relapse: p=0.37 indicating that we have no evidence of diffences in cumulative  incidence for the treament groups. We do not reject the null.
+```
+
+Results
+
+a)
+
+Unadjusted
+
+For the disease relapse: the HR is 0.620 (95% CI 0.467-0.822). This
+means that at a given time since diagnosis, the hazard of disease
+relapse among people receiving radiotherapy+chemo is 0.62 times the
+hazard of those receiving radiotherapy alone. The 95% CI does not
+contain the null value, indicating that there is evidence that this
+cause-specific hazard ratio is not 1. For death without relapse: the
+cause-specific HR is 0.98 (95% CI 0.679 - 1.416). This means that at a
+given time since diagnosis, the hazard of death without relapse among
+those receiving the intervention is 0.98 time that of those receiving
+radiotherapy alone. However, since the 95% CI contains the null value,
+we do not have enough evidence against the null that the cause specific
+hazard ratio is 1.
+
+Adjusted
+
+For disease relapse: the estimated HR for treatment is 0.493(95% CI
+0.3523 to 0.6909), for age 1.016(95% CI 1.008 to 1.024), sex 0.971 (95%
+CI 0.764 to 1.233), for clinical stage diagnosis 1.570 (95% CI 1.186 to
+2.077), for Small mediastinum involvemnt at diagnosis 0.749(0.557 to
+1.007), for large mediastinum involvement 1.133 (95% CI 0.735 to 1.748)
+and for extranodal disease 1.374 (95% CI 0.901 to 2.097). From this, we
+can say that theintervention group sis estimated to have a hazard for
+disease relapse that is 51% lower than the radiotherapy alone group,
+conditional on age, sex, clinical stage, mediastnum involvement and
+extranodal disease. For age, we can say that a unit increase in age is
+associated with a 2% increase in hazard of disease relapse(we have some
+evidence). Females have a 3% lower hazard of disease relapse compared to
+the males (no evidence). Patients with stage 2 clinical stage at
+diagnosis have a 57% higher risk of disease relapse that stage 1,
+conditional on other covariates (string evidence). Patients with small
+extent of mediastinum involvement at diagnosis are estimated to have a
+hazard of disease relapse that is 26% lower than those without
+mediastinum involvement, conditional on other covariates. nOn the
+contrary patients with large extent of mediastinum involvement at
+diagnosis are estimated to have a hazard of disease relapse that is 13%
+higher than those without mediastinum involvement, conditional on other
+covariates. Participants will extranodal disease have an estimated
+hazard of disease relapse that iis 37 % higher that those without,
+conditional on the other covariates, and there is no evidence for this
+association though.
+
+For death without relapse: the estimated HR for treatment is 1.082(95%
+CI 0.728 to 1.608), for age 1.081(95% CI 1.068 to 1.094), sex 0.614 (95%
+CI 0.414 to 0.910), for clinical stage diagnosis 1.381 (95% CI 0.898 to
+2.124), for Small mediastinum involvemnt at diagnosis 0.987(0.597 to
+1.635), for large mediastinum involvement 0.764 (95% CI 0.353 to 1.653)
+and for extranodal disease 0.821 (95% CI 0.436 to 1.543).
+
+From this, we can say that theintervention group is estimated to have a
+hazard for death without relapse that is 8% higher than the radiotherapy
+alone group, conditional on age, sex, clinical stage, mediastnum
+involvement and extranodal disease (no evidence). For age, we can say
+that a unit increase in age is associated with an 18% increase in hazard
+of death without relapse(we have some evidence). Females have a 39%
+lower hazard of death without relapse compared to the males (we have
+evidence). Patients with stage 2 clinical stage at diagnosis have a 38%
+higher risk of death without relapse that stage 1, conditional on other
+covariates (no evidence). Patients with small extent of mediastinum
+involvement at diagnosis are estimated to have a hazard of death without
+relapse that is 2% lower than those without mediastinum involvement,
+conditional on other covariates. On the contrary patients with large
+extent of mediastinum involvement at diagnosis are estimated to have a
+hazard of death without relapse that is 24% lower than those without
+mediastinum involvement, conditional on other covariates (no evidence).
+Participants will extranodal disease have an estimated hazard of death
+without relapse that is 18% lower than those without, conditional on the
+other covariates, and there is no evidence for this association though
+(asically difference is due to random chance!).
+
+b
+
+Figure title: Cumulative incidences of Disease Relapse and Death without
+relapse by treatment given using cause-specific proportional hazards
+model
+
+We see from the curves that for disease relapse has high incidence
+within the first 5 months of diagnosis for both treatment strategies
+indicating high risk of events within the first 5 months. However, this
+rate slows down up to around 15 months and platues at 20 months where we
+have no more events in both groups.
+
+For death without relapse,
+
+Additionally, we can see that the cause-specific proportional hazards
+assumption is reasonable for both disease relapse and death without
+relapse. However, when we compare this to the Aalen-Johnson estimates
+plot for cumulative incidences, we see clear differences where the PH
+assumption doesn't stand for the deaths without relapse event.
+
+Cumulative incidence
+
+Radiotherapy alone
+
+CI for disease relapse is 37.5% (0.375)
+
+CI for deaths without relapse is 6.6%(0.065798)
+
+Radiotherapy plus chemotherapy
+
+CI for disease relapse is 21.1%(0.2110)
+
+CI for death without relapse is 13.7%(0..1370)
+
+The grays test for the cumulative incidence of the events by treatment
+group tell us:
+
+For Disease relapse: We have p-value of 0.0007 indicating very strong
+evidence against the null that the cumulative incidence between the two
+treatment strategies is the same.
+
+For Death with out relapse: We have a p-value of 0.3739 indicating very
+weak evidence again the null. We can then conclude that there is no
+evidence of a difference in cumulative incidence of death without
+relapse between the two treatment groups.
+
+#### Part 4: Estimating a marginal treatment effect 
+
+Methods 
+To get the marginal risk for the two two treatment strategies,
+two separate datasets based on the original data were creating with all
+observations in each of the datasets having either the radiotherapy plus
+chemotherapy or the radiotherapy alone. Using the cox adjusted model,
+predicted survival probabilities at 12 months were obtained for each
+observation and these were used to obtain the average risk at that
+timepoint.
+
+Marginal treatment risk were obtained by generating the Restricted Mean
+Survival Time for the two treatment groups, and by generating the risk
+ratios for the two groups. A milestone time of 12 months was chosen due
+to the fact that chemotherapy in cancer treatment is considered to have
+harmful effects within the short term of intervention and the effects
+start to get realised after about a year on treatment. Comparing the
+RMST and risk ratio values at 6, 12 and 24 months also identified the 12
+months as an optimal milestone time point for assess and determine
+treatment effects for the two groups. The individual group risks were
+obtained from the Kaplan Meier estimates for event-free survival at the
+specific time points.
+
+Composite outcome a) Marginal risks
+
+```{r}
+#Based on the model in 2b: cox_p2_adj
+assignment$trtgiven <- as.factor(assignment$trtgiven)
+adjsurv<-adjustedsurv(data=assignment,
+                      variable="trtgiven",
+                      ev_time="time",
+                      event="event",
+                      method="direct",
+                      outcome_model=cox_p2_adj,
+                      conf_int=TRUE,
+                      bootstrap=F,times=12)
+# plot(adjsurv,conf_int=T,custom_colors=c("black","grey"),  ###this plot only works if we do not speccify a time, it is meant for the marginal risk all through the study period.
+#      xlab="Time(months)",
+#      legend.title="Treatment",
+#      ylim=c(0,1))
+
+#Risks at 12 months
+adjsurv$ate_object$meanRisk
+
+##risk diff at time 12
+adjsurv$ate_object$diffRisk
+
+#risk ratio at time 12
+adjsurv$ate_object$ratioRisk
+
+
+
+
+###MANUALLY
+#'byhand' implementation
+#--
+#create dataset in which trtgiven is set to 1 for everyone
+p3_data_radiochemo<-assignment
+p3_data_radiochemo$trtgiven<-1
+#create dataset in which trtgiven is set to 0 for everyone
+p3_data_radio<-assignment
+p3_data_radio$trtgiven<-0
+
+#predicted risk up to time 12 for each individual using cox_p2_adj
+#Using predictSurvProb from pec package- neater
+risk.radiochemo<-1-predictSurvProb(cox_p2_adj,newdata=p3_data_radiochemo,times=12)
+risk.radio<-1-predictSurvProb(cox_p2_adj,newdata=p3_data_radio,times=12)
+cbind(risk.radiochemo, risk.radio)[1:5]
+#meansurvivalprobabilityateachtime,averagingoverallindividuals
+riskmean.radiochemo<-mean(risk.radiochemo)
+riskmean.radio<-mean(risk.radio)
+
+
+```
+
+| Estimand | Estimate | 95% CI |
+|------------------------|------------------------|------------------------|
+| Marginal risk up to 12 years: Radiotherapy+Chemotherapy | 0.317 | 0.266 to 0.368 |
+| Marginal risk up to 12 years: Radiotherapy Only | 0.431 | 0.266 to 0.368 |
+| Marginal risk difference | -0.114 | -0.178 to -0.051 |
+
+b)  Marginal treatment risks
+
+```{r}
+##For this part, we need to choose a MILESTONE TIMEPOINT for which we can get a  risk ratio and a restriccted mean difference. Get the milestone time and give justification for it. We can look at the risk difference p-values and the restricted mean p-values and compare the to, to see if we have an appropriate value and to see if both measurements make sense.
+#We shall have to first plot the KM graph to see
+#Kaplan-Meier by treatment
+km_p4<-survfit(Surv(time,event)~trtgiven,data=assignment)
+
+plot(km_p4, ylab="Survival probability",
+     xlab = "Times from diagnosis (months)",
+     lwd = 2, lty = c(1,2))
+legend("topright", c("Radio", "Radio+Chemo"),
+       lwd=2,
+       lty=c(1,2)
+       )
+
+#Radio plus Chem first has a rapid fall in the survival before they cross over at 
+
+##Restricted mean diff: This method compares area under a curve at specific timeperiods and it is best used for cases like these where we observe a cross over.
+print(km_p4,rmean=6)
+rmst2(assignment$time, assignment$event, assignment$trtgiven, tau=12)
+
+##Risk Ratio: We get the risks a 1 year and see. We get risks using the KM estimates (The survival probabilties)
+#riskdiffsat8m
+risk_radio<-1-summary(km_p4,times=c(6))$surv[1]
+risk_radiochem<-1-summary(km_p4,times=c(6))$surv[2]
+
+varrisk_radio<-summary(km_p4,times=c(6))$std.err[1]^2
+
+varrisk_radiochem<-summary(km_p4,times=c(6))$std.err[2]^2
+var.riskdiff<-varrisk_radiochem+varrisk_radio #Variance for the two independent times
+
+lower.ci.riskdiff<-(risk_radiochem/risk_radio)-1.96*sqrt(var.riskdiff) ##Risk Ratio Lower CI
+upper.ci.riskdiff<-(risk_radiochem/risk_radio)+1.96*sqrt(var.riskdiff) ##Risk Ratio Upper CI
+
+risk_radiochem/risk_radio ##Risk Ratio
+
+lower.ci.riskdiff
+upper.ci.riskdiff
+
+2*pnorm((risk_radiochem-risk_radio)/sqrt(var.riskdiff))#p-
+
+
+##Working with a milestone time point of 1 year (12 months) allows for us to identify sufficient time for us to allow for accummulation of treatment benefit for the intervention.
+#At 6 months, the risk ratio provides way more evidence of a treatment benefit than the RSMT and this is because the time-frame is inappropriately short and has not allowed given enough time for the treatment benefit to accumulate.
+#At 24 months however, we see that the the risk ratio did not give any evidence of a treatment benefit (p-value=0.02), whereas the RSMT gave string evidence (p-value=0.001) of treatment evidence.
+
+
+
+```
+
+Results 
+a) If everyone had been given radiotherapy alone, the expected
+marginal probability of disease relapse/death without relapsse up to 12
+months is 43.1%. On the otherhand, if everyone has been given
+radiotherapy with chemotherapy the expected marginal probability up to
+12 month sis 31.7%.
+
+b)  
+
+A Kaplan Meier plot shows a cross over between the treatment curves for
+the Radiotherapy alone and the intervention group, showing initial harm
+from the intervention for a period of about 1 month before this changes.
+
+At 12 months, the RSMT difference is 1.211 months (95% CI; 0.538 -
+1.884; p-value\<0.001) indicating that within 12 months of initiating
+radio plus chemo, time to disease relapse/death without relapse is
+delayed by about 1.2 months in the intervention group compared to the
+radio alone group. The Risk Ratio: 0.699(95% CI; 0.629 - 0.770;
+p-value=0.0002) indicates that within 12 months the risk of disease
+relapse/death without relapse is lower by about 31% within the
+intervention group compared to the radio alone group.
+
+At this point, we check milestone times of 6, 12 and 24 months, and the
+12 months time point seemed to be the most ideal point, because of the
+fact that it produces relevant and significant results with both
+measures used. At 6 months, the Risk ratio was working better because
+the intervention group treatment effect was just being realised just
+after a cross over at around 1 month. conversely, at the 24 months
+period, only the RSMT gave evidence and this is because the treatment
+effects by both groups were stabilising at this point, and few cases
+were being obtained (Risk ratio and risk measurements are affected by
+the number of cases later on in the study).
+
+Summary
+
+We see that with the cuase specific analysis, the intervention is good
+for disease relapse but not for the death without relapse. Looking at
+the cumulative incidence curves for the model with cause-specif shows
+this.
